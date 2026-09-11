@@ -65,7 +65,7 @@ async def list_today_tasks(db: AsyncSession, user_id: str) -> list[dict]:
         .where(
             ReviewTask.user_id == user_id,
             ReviewTask.planned_date <= today,
-            ReviewTask.status == "pending",
+            ReviewTask.status.in_(["pending", "postponed"]),
         )
         .order_by(ReviewTask.planned_date.asc(), ReviewTask.completed_at.asc())
         .limit(200)
@@ -127,6 +127,8 @@ async def submit_rating(
     db.add(next_task)
     await db.commit()
 
+    # 写穿更新复习统计（design §2.2.2.6 submit后置：更新复习统计）
+    await refresh_statistics(db, user_id)
     await redis_client.cache_delete(review_today_cache_key(user_id))
     return {
         "rating": rating,
@@ -134,3 +136,91 @@ async def submit_rating(
         "next_review_date": next_task.planned_date.isoformat(),
         "next_task_id": str(next_task.id),
     }
+
+
+TREND_DAYS = 14  # 遗忘趋势回看窗口（spec §6.7规则2 按日/周）
+
+
+async def refresh_statistics(db: AsyncSession, user_id: str) -> dict:
+    """重算并持久化用户复习统计（spec §6.7：由完成记录聚合派生）。
+
+    - total_reviews：已完成复习任务数
+    - mastered_count / consolidating_count：按每张卡片最近一次自评归类
+      （记住→已掌握；模糊/忘记→待巩固，spec §6.7规则2）
+    - trend_data：近14天每日完成数与"记住"数
+    """
+    from datetime import timedelta
+
+    from app.models import ReviewStatistics
+
+    done_result = await db.execute(
+        select(ReviewTask)
+        .where(ReviewTask.user_id == user_id, ReviewTask.status == "done")
+        .order_by(ReviewTask.completed_at.asc())
+    )
+    done_tasks = done_result.scalars().all()
+    total_reviews = len(done_tasks)
+
+    # 每卡最近一次自评
+    latest_rating: dict[str, str] = {}
+    for rt in done_tasks:
+        if rt.rating and rt.card_id:
+            latest_rating[str(rt.card_id)] = rt.rating
+    mastered = sum(1 for r in latest_rating.values() if r == "remember")
+    consolidating = sum(1 for r in latest_rating.values() if r in ("blur", "forget"))
+
+    # 近14天趋势（UTC日界，与排定口径一致）
+    today = _today()
+    trend: list[dict] = []
+    for offset in range(TREND_DAYS - 1, -1, -1):
+        day = today - timedelta(days=offset)
+        day_done = [rt for rt in done_tasks if rt.completed_at and rt.completed_at.date() == day]
+        trend.append({
+            "date": day.isoformat(),
+            "done": len(day_done),
+            "remember": sum(1 for rt in day_done if rt.rating == "remember"),
+        })
+
+    result = await db.execute(select(ReviewStatistics).where(ReviewStatistics.user_id == user_id))
+    stats = result.scalar_one_or_none()
+    if stats is None:
+        stats = ReviewStatistics(user_id=user_id)
+        db.add(stats)
+    stats.total_reviews = total_reviews
+    stats.mastered_count = mastered
+    stats.consolidating_count = consolidating
+    stats.trend_data = trend
+    await db.commit()
+    return {
+        "total_reviews": total_reviews,
+        "mastered_count": mastered,
+        "consolidating_count": consolidating,
+        "trend_data": trend,
+        "streak_days": stats.streak_days,
+    }
+
+
+async def postpone_overdue_tasks(db: AsyncSession) -> int:
+    """逾期复习顺延（P1-7b，design §2.7.4、spec §6.5规则4）。
+
+    每日1:00：扫描 planned_date < 今日 且仍 pending 的任务 → 置"已顺延"，
+    计划日期改为当天（不删除，今日清单继续可见）。
+    """
+    from sqlalchemy import update
+
+    today = _today()
+    result = await db.execute(
+        select(ReviewTask).where(ReviewTask.status == "pending", ReviewTask.planned_date < today)
+    )
+    overdue = result.scalars().all()
+    if not overdue:
+        return 0
+    affected_users: set[str] = set()
+    for rt in overdue:
+        rt.status = "postponed"
+        rt.planned_date = today
+        affected_users.add(str(rt.user_id))
+    await db.commit()
+    for uid in affected_users:
+        await redis_client.cache_delete(review_today_cache_key(uid))
+    return len(overdue)

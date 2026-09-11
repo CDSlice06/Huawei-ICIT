@@ -113,11 +113,12 @@ async def test_parse_failure_preserves_raw(session_factory, kb_with_user, monkey
 async def test_image_parse_uses_multimodal_and_obs_url(session_factory, kb_with_user, monkeypatch):
     """图片录入：多模态一次调用（120s），图片URL来自OBS配置（§5.8.1规则1）。"""
     ctx = kb_with_user
-    from app.infrastructure.maas_client import MaasError
-
-    monkeypatch.setattr("app.config.settings.OBS_ENDPOINT", "https://bucket.obs.cn-east-3.myhuaweicloud.com")
     fake = FakeMistakeMaaS()
     monkeypatch.setattr(ms, "get_maas_client", lambda: fake)
+    monkeypatch.setattr(
+        "app.infrastructure.obs_client.image_access_url",
+        lambda obs_key: f"https://bucket.obs.example.com/{obs_key}",
+    )
     async with session_factory() as db:
         entry, task = await ms.create_image_mistake(db, ctx["user_id"], "mistakes/img-1.jpg")
         await ms.mistake_parse_task_handler(db, task)

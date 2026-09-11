@@ -70,10 +70,27 @@ def _validate_card_schema(data: dict) -> dict:
     }
 
 
-async def structure_task_handler(db: AsyncSession, task: AsyncTask) -> dict:
-    """structure 任务真实 handler（tasks.md 5.2）。
+def validate_card_payloads(raw: dict) -> list[dict]:
+    """兼容单卡片与多卡片（P1-8 长内容拆分）两种返回形态，逐卡校验。
 
-    流程：读素材→MaaS结构化→校验→事务内落库卡片+更新素材状态+首排复习任务。
+    长素材可输出 {"cards": [卡片1, ...]}（1~5张，同素材归属，spec §5.3.1规则6）；
+    任何一张不合法整体失败，不落残缺卡片（spec §5.3.3异常2）。
+    """
+    if isinstance(raw.get("cards"), list):
+        cards_data = raw["cards"]
+        if not 1 <= len(cards_data) <= 5:
+            raise StructuredSchemaError("拆分卡片数量须为1~5张")
+        return [_validate_card_schema(card) for card in cards_data]
+    return [_validate_card_schema(raw)]
+
+
+async def structure_task_handler(db: AsyncSession, task: AsyncTask) -> dict:
+    """structure 任务真实 handler（tasks.md 5.2；P1-2/3 扩展文档与图片；P1-8 多卡片）。
+
+    - 文本素材：raw_content → MaaS结构化（P0路径）
+    - 文档素材（P1-2）：PyMuPDF/docx 提取正文（存 extracted_text）→ 文本路径
+    - 图片素材（P1-3）：MaaS 多模态一次调用（OCR+结构化，120s超时）
+    - 长内容拆分（P1-8）：模型可返回 {"cards":[...]}，多卡同素材归属，各自首排
     校验失败不落库残缺卡片，素材保留（spec §5.3.3异常2）。
     """
     asset_result = await db.execute(
@@ -83,37 +100,77 @@ async def structure_task_handler(db: AsyncSession, task: AsyncTask) -> dict:
     if asset is None:
         raise StructuredSchemaError(f"素材 {task.ref_id} 不存在")
 
-    content = asset.extracted_text or asset.raw_content or ""
     client = get_maas_client()
-    raw = await client.chat_json(
-        [
-            {"role": "system", "content": STRUCTURE_SYSTEM_PROMPT},
-            {"role": "user", "content": STRUCTURE_USER_TEMPLATE.format(content=content)},
-        ]
-    )
-    data = _validate_card_schema(raw)
+    if asset.type == "doc":
+        # 文档正文提取（缓存进 extracted_text，重试不重复解析）
+        if not asset.extracted_text:
+            from app.infrastructure import document_extractor
 
-    card = KnowledgeCard(
-        user_id=task.user_id,
-        kb_id=asset.kb_id,
-        asset_id=asset.id,
-        title=data["title"],
-        summary=data["summary"],
-        key_points=data["key_points"],
-        qa_pairs=data["qa_pairs"],
-        tags=data["tags"],
-        review_interval_days=spaced_repetition.first_interval(),
-        review_count=0,
-        created_at=_now(),
-    )
-    db.add(card)
+            asset.extracted_text = document_extractor.extract_document_text(
+                asset.obs_key or "", asset.raw_content or "",
+                read_bytes=lambda: _read_asset_bytes(asset),
+            )
+            await db.commit()
+        raw = await client.chat_json(_structure_messages(asset.extracted_text))
+    elif asset.type == "image":
+        from app.infrastructure import obs_client
+        from app.infrastructure.prompts import CARD_IMAGE_USER_PROMPT
+
+        image_url = obs_client.image_access_url(asset.obs_key)
+        if not image_url:
+            raise StructuredSchemaError("图片不可访问（OBS未配置或文件缺失）")
+        raw = await client.chat_json(
+            [
+                {"role": "system", "content": STRUCTURE_SYSTEM_PROMPT},
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": CARD_IMAGE_USER_PROMPT},
+                        {"type": "image_url", "image_url": {"url": image_url}},
+                    ],
+                },
+            ],
+            multimodal=True,
+        )
+    else:
+        content = asset.extracted_text or asset.raw_content or ""
+        raw = await client.chat_json(_structure_messages(content))
+
+    cards_data = validate_card_payloads(raw)
+
+    # 素材无归属库时兜底解析默认库（card.kb_id NOT NULL，spec §5.2.1规则6）
+    if asset.kb_id:
+        target_kb_id = asset.kb_id
+    else:
+        from app.services import import_service
+
+        target_kb_id = await import_service.resolve_kb_id(db, task.user_id, None)
+
+    cards: list[KnowledgeCard] = []
+    for data in cards_data:
+        card = KnowledgeCard(
+            user_id=task.user_id,
+            kb_id=target_kb_id,
+            asset_id=asset.id,
+            title=data["title"],
+            summary=data["summary"],
+            key_points=data["key_points"],
+            qa_pairs=data["qa_pairs"],
+            tags=data["tags"],
+            review_interval_days=spaced_repetition.first_interval(),
+            review_count=0,
+            created_at=_now(),
+        )
+        db.add(card)
+        cards.append(card)
     await db.flush()
 
     # 首排复习任务：planned_date=创建日+1天（spec §5.6.1规则1，复用8.2排定函数）
     task_date = _today() + timedelta(days=1)
     from app.services import review_service
 
-    await review_service.schedule_first_review(db, card)
+    for card in cards:
+        await review_service.schedule_first_review(db, card)
     asset.parse_status = "done"
     await db.commit()
 
@@ -123,7 +180,25 @@ async def structure_task_handler(db: AsyncSession, task: AsyncTask) -> dict:
     await redis_client.cache_delete(
         redis_client.KEY_REVIEW_TODAY.format(user_id=task.user_id, date=task_date.isoformat())
     )
-    return {"card_id": str(card.id), "title": card.title}
+    return {"card_ids": [str(c.id) for c in cards], "title": cards[0].title, "card_count": len(cards)}
+
+
+def _structure_messages(content: str) -> list[dict]:
+    from app.infrastructure.prompts import STRUCTURE_SYSTEM_PROMPT, STRUCTURE_USER_TEMPLATE
+
+    return [
+        {"role": "system", "content": STRUCTURE_SYSTEM_PROMPT},
+        {"role": "user", "content": STRUCTURE_USER_TEMPLATE.format(content=content)},
+    ]
+
+
+def _read_asset_bytes(asset: KnowledgeAsset) -> bytes:
+    """读取素材原始字节（本地回退存储；OBS 模式由云端 getObject 扩展点接入）。"""
+    from app.infrastructure import obs_client
+
+    if not obs_client.is_obs_configured() and asset.obs_key:
+        return obs_client.local_read(asset.obs_key)
+    raise StructuredSchemaError("素材文件不可读（OBS未配置且无本地缓存）")
 
 
 async def list_cards(

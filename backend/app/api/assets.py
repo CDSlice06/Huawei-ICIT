@@ -54,6 +54,65 @@ async def import_text(
     return ok(data={"task_id": str(task.id), "asset_id": str(asset.id)}, message="解析中")
 
 
+class FileImportRequest(BaseModel):
+    obs_key: str = Field(description="OBS对象键（presign直传/本地代存后回传）", max_length=512)
+    filename: str = Field(default="", description="原始文件名", max_length=255)
+    kb_id: str | None = Field(default=None, description="目标知识库，缺省写入默认知识库")
+
+
+async def _gate(db: AsyncSession, user: User) -> dict | None:
+    """单用户并发解析闸门（design §2.1.3.1，所有 structure 类任务合并计数）。"""
+    try:
+        await import_service.check_concurrency_gate(db, user.id)
+    except import_service.GateLimitReached:
+        return fail(ERR_RATE_LIMIT, "已有任务解析中，请稍候", status_code=429)
+    return None
+
+
+@router.post("/document", status_code=202, response_model=dict)
+async def import_document(
+    payload: FileImportRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """文档导入（P1-2）：PDF/Word/TXT/MD ≤20MB，提取正文后走MaaS结构化任务链。"""
+    if blocked := await _gate(db, user):
+        return blocked
+    try:
+        asset, task = await import_service.create_file_asset(
+            db, user.id, "doc", payload.obs_key, payload.filename, payload.kb_id
+        )
+    except FileNotFoundError:
+        return fail(ERR_VALIDATION, "上传文件不存在或已过期，请重新上传", status_code=422)
+    except import_service.KnowledgeBaseNotFound:
+        return fail(ERR_VALIDATION, "目标知识库不存在或无权访问该文件", status_code=422)
+    task_runner.submit_task(str(task.id))
+    log_action(logger, "asset:document_import", user_id=user.id, asset_id=asset.id)
+    return ok(data={"task_id": str(task.id), "asset_id": str(asset.id)}, message="解析中")
+
+
+@router.post("/image", status_code=202, response_model=dict)
+async def import_image(
+    payload: FileImportRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """图片导入（P1-3）：MaaS多模态一次调用（OCR+结构化，120s超时，≤10MB）。"""
+    if blocked := await _gate(db, user):
+        return blocked
+    try:
+        asset, task = await import_service.create_file_asset(
+            db, user.id, "image", payload.obs_key, payload.filename, payload.kb_id
+        )
+    except FileNotFoundError:
+        return fail(ERR_VALIDATION, "上传文件不存在或已过期，请重新上传", status_code=422)
+    except import_service.KnowledgeBaseNotFound:
+        return fail(ERR_VALIDATION, "目标知识库不存在或无权访问该文件", status_code=422)
+    task_runner.submit_task(str(task.id))
+    log_action(logger, "asset:image_import", user_id=user.id, asset_id=asset.id)
+    return ok(data={"task_id": str(task.id), "asset_id": str(asset.id)}, message="识别解析中")
+
+
 @router.get("/{asset_id}", response_model=dict)
 async def get_asset(
     asset_id: str,

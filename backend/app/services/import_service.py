@@ -88,6 +88,48 @@ async def create_text_asset(
     return asset, task
 
 
+async def create_file_asset(
+    db: AsyncSession, user_id: str, asset_type: str, obs_key: str, filename: str, kb_id: str | None
+) -> tuple[KnowledgeAsset, AsyncTask]:
+    """创建文档/图片素材+异步结构化任务（P1-2/P1-3）。
+
+    obs_key 归属校验（{user_id}/ 前缀）；文档将文件名暂存 raw_content 供解析时识别类型。
+    """
+    from app.infrastructure import obs_client
+
+    if asset_type not in ("doc", "image"):
+        raise ValueError("素材类型非法")
+    if not obs_key.startswith(f"{user_id}/"):
+        raise KnowledgeBaseNotFound()  # 复用"目标不存在"语义 → API层422
+
+    # 上传对象可用性校验（本地回退检查文件存在；OBS模式由直传链路保证）
+    if not obs_client.ensure_local_placeholder_exists(obs_key):
+        raise FileNotFoundError(obs_key)
+
+    resolved_kb = await resolve_kb_id(db, user_id, kb_id)
+    asset = KnowledgeAsset(
+        user_id=user_id,
+        kb_id=resolved_kb,
+        type=asset_type,
+        raw_content=filename if asset_type == "doc" else None,
+        obs_key=obs_key,
+        parse_status="parsing",
+        created_at=_now(),
+    )
+    db.add(asset)
+    await db.flush()
+    task = AsyncTask(
+        user_id=user_id,
+        type="structure",
+        ref_id=asset.id,
+        status="pending",
+        created_at=_now(),
+    )
+    db.add(task)
+    await db.commit()
+    return asset, task
+
+
 class AssetNotFound(Exception):
     """素材不存在。"""
 

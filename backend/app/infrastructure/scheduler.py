@@ -117,8 +117,22 @@ def _demo_reset_job() -> None:
 
 
 def _postpone_job() -> None:
-    """逾期复习顺延（P1-7实现，P0占位）。"""
-    logger.info("逾期顺延任务占位（P1-7未实现），跳过")
+    """逾期复习顺延（P1-7b）：pending且planned_date<今日 → 置已顺延、计划日期改为当天。"""
+    try:
+        import asyncio
+
+        from app.db import AsyncSessionLocal
+        from app.services import review_service
+
+        async def _run() -> int:
+            async with AsyncSessionLocal() as db:
+                return await review_service.postpone_overdue_tasks(db)
+
+        count = asyncio.run(_run())
+        if count:
+            logger.info("逾期复习顺延完成：%d 个任务", count)
+    except Exception as exc:  # noqa: BLE001
+        logger.error("逾期复习顺延失败: %s", exc)
 
 
 async def shutdown_scheduler() -> None:

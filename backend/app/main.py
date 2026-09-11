@@ -74,17 +74,21 @@ from app.api import (  # noqa: E402
     knowledge_bases,
     mind_maps,
     mistakes,
+    obs,
     reviews,
+    search,
     tasks,
 )
 
 app.include_router(auth.router, prefix="/api")
 app.include_router(assets.router, prefix="/api")
+app.include_router(obs.router, prefix="/api")
 app.include_router(cards.router, prefix="/api")
 app.include_router(knowledge_bases.router, prefix="/api")
 app.include_router(mind_maps.router, prefix="/api")
 app.include_router(reviews.router, prefix="/api")
 app.include_router(mistakes.router, prefix="/api")
+app.include_router(search.router, prefix="/api")
 app.include_router(tasks.router, prefix="/api")
 app.include_router(admin.router, prefix="/api")
 

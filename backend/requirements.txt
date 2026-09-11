@@ -12,6 +12,12 @@ httpx>=0.27
 apscheduler>=3.10,<4.0
 cryptography>=42.0
 
+# P1 文档/图片导入与OBS直传
+pymupdf>=1.24
+python-docx>=1.1
+esdk-obs-python>=3.23
+python-multipart>=0.0.9
+
 # 测试依赖
 pytest>=8.0
 pytest-asyncio>=0.23

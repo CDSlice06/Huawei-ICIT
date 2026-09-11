@@ -49,3 +49,12 @@ async def submit_rating(
         return fail(ERR_CONFLICT, "该任务已完成，请勿重复提交", status_code=409)
     log_action(logger, "review:submit", user_id=user.id, task_id=task_id, rating=payload.rating)
     return ok(data=result)
+
+@router.get("/statistics", response_model=dict)
+async def get_statistics(
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """复习统计（P1-7，spec §6.7）：累计次数/已掌握/待巩固/近14天趋势。"""
+    data = await review_service.refresh_statistics(db, user.id)
+    return ok(data=data)

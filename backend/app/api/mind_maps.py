@@ -2,7 +2,7 @@
 import logging
 
 from fastapi import APIRouter, Depends
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_db
@@ -10,7 +10,7 @@ from app.dependencies import NotFoundError, get_current_user
 from app.infrastructure import task_runner
 from app.logging_config import log_action
 from app.models import User
-from app.schemas.response import ERR_RATE_LIMIT, fail, ok
+from app.schemas.response import ERR_RATE_LIMIT, ERR_VALIDATION, fail, ok
 from app.services import import_service, kb_service, map_service
 
 logger = logging.getLogger(__name__)
@@ -20,6 +20,29 @@ router = APIRouter(prefix="/mind-maps", tags=["mind-maps"])
 
 class MapGenRequest(BaseModel):
     kb_id: str
+
+
+class NodeUpdateItem(BaseModel):
+    id: str
+    title: str | None = Field(default=None, max_length=50)
+    parent_id: str | None = None
+    pos_x: float | None = None
+    pos_y: float | None = None
+    card_id: str | None = None
+
+
+class NodeAddItem(BaseModel):
+    parent_id: str | None = None
+    title: str = Field(max_length=50)
+    card_id: str | None = None
+    pos_x: float | None = None
+    pos_y: float | None = None
+
+
+class MapNodesRequest(BaseModel):
+    updates: list[NodeUpdateItem] = Field(default_factory=list)
+    additions: list[NodeAddItem] = Field(default_factory=list)
+    deletions: list[str] = Field(default_factory=list)
 
 
 @router.post("/generate", response_model=dict, status_code=202)
@@ -46,6 +69,27 @@ async def generate_map(
     task_runner.submit_task(str(task.id))
     log_action(logger, "map:generate", user_id=user.id, kb_id=payload.kb_id)
     return ok(data={"task_id": str(task.id)}, message="导图生成中")
+
+
+@router.put("/{kb_id}/nodes", response_model=dict)
+async def update_map_nodes(
+    kb_id: str,
+    payload: MapNodesRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """批量编辑导图节点（P1-6，spec §5.5.1规则4~7）：标题/父子/位置/增删，版本来源置"手动编辑"。"""
+    try:
+        await map_service.update_map_nodes(
+            db, user.id, kb_id, payload.model_dump(exclude_unset=True)
+        )
+    except map_service.MapNotFound:
+        return fail(40400, "导图不存在", status_code=404)
+    except map_service.NodeRuleError as exc:
+        return fail(ERR_VALIDATION, str(exc), status_code=422)
+    data = await map_service.get_map_by_kb(db, user.id, kb_id)
+    log_action(logger, "map:edit_nodes", user_id=user.id, kb_id=kb_id)
+    return ok(data=data, message="导图已更新")
 
 
 @router.get("/{kb_id}", response_model=dict)

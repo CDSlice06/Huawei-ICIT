@@ -92,12 +92,13 @@ def _validate_mistake_schema(data: dict) -> dict:
 
 
 def _multimodal_image_url(obs_key: str) -> str:
-    """由 OBS 配置拼装图片可访问 URL（P1-3 直传链路的前置约定）。"""
-    from app.config import settings
+    """多模态识别用的图片可访问URL（OBS签名GET；本地回退None→走OBS缺失提示）。"""
+    from app.infrastructure import obs_client
 
-    if not settings.OBS_ENDPOINT:
+    url = obs_client.image_access_url(obs_key)
+    if not url:
         raise MaasError("图片录入依赖OBS对象存储（OBS_ENDPOINT未配置），请先完成华为云OBS配置或改用文本录入")
-    return f"{settings.OBS_ENDPOINT.rstrip('/')}/{obs_key.lstrip('/')}"
+    return url
 
 
 async def mistake_parse_task_handler(db: AsyncSession, task: AsyncTask) -> dict:
