@@ -1,0 +1,89 @@
+/* MemWeave 全局样式：黑白简约高级风，低饱和度，充足留白（ui-design.md §2.1） */
+:root {
+  --mw-text-primary: #1f2329;
+  --mw-text-secondary: #646a73;
+  --mw-text-tertiary: #8f959e;
+  --mw-border: #e5e6eb;
+  --mw-bg-page: #fafafa;
+  --mw-bg-card: #ffffff;
+  --mw-bg-hover: #f2f3f5;
+  --mw-accent: #1f2329;
+  --mw-sidebar-width: 208px;
+  --mw-topbar-height: 56px;
+  --mw-content-max-width: 1440px;
+  --mw-radius: 8px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  min-width: 1280px;
+  font-family:
+    'PingFang SC',
+    'Microsoft YaHei',
+    'Helvetica Neue',
+    Arial,
+    sans-serif;
+  color: var(--mw-text-primary);
+  background: var(--mw-bg-page);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* 统一卡片：细边框+浅白底，hover轻阴影（ui-design.md §4.2） */
+.mw-card {
+  background: var(--mw-bg-card);
+  border: 1px solid var(--mw-border);
+  border-radius: var(--mw-radius);
+  transition: box-shadow 0.2s ease;
+}
+.mw-card:hover {
+  box-shadow: 0 4px 16px rgba(31, 35, 41, 0.08);
+}
+
+/* 主内容区：居中布局，基准1440px（design.md §2.6.5） */
+.mw-content {
+  max-width: var(--mw-content-max-width);
+  margin: 0 auto;
+  padding: 24px 32px;
+}
+
+/* 文本层级 */
+.mw-title {
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--mw-text-primary);
+}
+.mw-subtitle {
+  font-size: 14px;
+  color: var(--mw-text-secondary);
+}
+.mw-caption {
+  font-size: 12px;
+  color: var(--mw-text-tertiary);
+}
+
+/* 标签：小字号浅底色（ui-design.md §4.2） */
+.mw-tag {
+  display: inline-block;
+  padding: 2px 8px;
+  font-size: 12px;
+  color: var(--mw-text-secondary);
+  background: var(--mw-bg-hover);
+  border-radius: 4px;
+  margin-right: 6px;
+}
+
+/* Element Plus 细节调优：弱化强色块（ui-design.md §2.1） */
+.el-button--primary {
+  --el-button-bg-color: var(--mw-accent);
+  --el-button-border-color: var(--mw-accent);
+  --el-button-hover-bg-color: #3d4148;
+  --el-button-hover-border-color: #3d4148;
+}
