@@ -46,10 +46,45 @@ export interface AssetCreated {
 export const assetApi = {
   importText: (content: string, kbId?: string) =>
     request.post<never, AssetCreated>('/assets/text', { content, kb_id: kbId || null }),
+  importDocument: (obsKey: string, filename: string, kbId?: string) =>
+    request.post<never, AssetCreated>('/assets/document', {
+      obs_key: obsKey,
+      filename,
+      kb_id: kbId || null,
+    }),
+  importImage: (obsKey: string, kbId?: string) =>
+    request.post<never, AssetCreated>('/assets/image', { obs_key: obsKey, kb_id: kbId || null }),
   get: (id: string) => request.get<never, Record<string, unknown>>(`/assets/${id}`),
   remove: (id: string) => request.delete(`/assets/${id}`),
   restruct: (id: string) =>
     request.post<never, { task_id: string }>(`/assets/${id}/restruct`),
+}
+
+// ---------- OBS 直传（P1-2/3，design §2.5.4） ----------
+
+export interface UploadTicket {
+  mode: 'obs' | 'local'
+  obs_key: string
+  upload_url: string
+  method: 'PUT' | 'POST'
+  headers: Record<string, string>
+  expires_at: string
+}
+
+export const obsApi = {
+  presign: (filename: string, contentType: string, kind: 'document' | 'image') =>
+    request.get<never, UploadTicket>('/obs/presign', {
+      params: { filename, content_type: contentType, kind },
+    }),
+  /** 本地回退模式的后端代存（OBS 模式由浏览器直传，不经过此方法） */
+  localUpload: (obsKey: string, file: File) => {
+    const form = new FormData()
+    form.append('file', file)
+    return request.post<never, { obs_key: string; size: number }>('/obs/local-upload', form, {
+      params: { obs_key: obsKey },
+    })
+  },
+  fileUrl: (obsKey: string) => `/api/obs/file/${obsKey}`,
 }
 
 export interface CardItem {
@@ -103,6 +138,15 @@ export const mapApi = {
     request.post<never, { task_id: string }>('/mind-maps/generate', { kb_id: kbId }),
   getByKb: (kbId: string) =>
     request.get<never, MapData | null>(`/mind-maps/${kbId}`),
+  /** 批量编辑节点（P1-6，spec §5.5.1规则4~7）：标题/父子/位置/增删，版本置"手动编辑" */
+  updateNodes: (
+    kbId: string,
+    payload: {
+      updates?: { id: string; title?: string; parent_id?: string | null; pos_x?: number | null; pos_y?: number | null; card_id?: string | null }[]
+      additions?: { parent_id?: string; title: string }[]
+      deletions?: string[]
+    },
+  ) => request.put<never, MapData>(`/mind-maps/${kbId}/nodes`, payload),
 }
 
 export interface ReviewItem {
@@ -126,6 +170,15 @@ export const reviewApi = {
     request.get<never, { items: ReviewItem[]; total: number }>('/reviews/today'),
   submit: (taskId: string, rating: 'forget' | 'blur' | 'remember') =>
     request.post<never, RatingResult>(`/reviews/${taskId}/submit`, { rating }),
+  /** 复习统计（P1-7，spec §6.7） */
+  statistics: () =>
+    request.get<never, {
+      total_reviews: number
+      mastered_count: number
+      consolidating_count: number
+      trend_data: { date: string; done: number; remember: number }[]
+      streak_days: number
+    }>('/reviews/statistics'),
 }
 
 export interface TaskStatus {
@@ -135,6 +188,53 @@ export interface TaskStatus {
   status: 'pending' | 'running' | 'done' | 'failed' | 'not_found'
   retry_count: number
   error: string | null
+}
+
+// ---------- 搜索与标签（P1-4/P1-5，spec §5.4.1规则4/6） ----------
+
+export interface SearchHit {
+  id: string
+  kb_id: string | null
+  relevance: number
+}
+
+export interface SearchCardHit extends SearchHit {
+  title: string
+  snippet: string
+  tags: string[]
+}
+
+export interface SearchAssetHit extends SearchHit {
+  asset_type: string
+  snippet: string
+}
+
+export interface SearchMistakeHit extends SearchHit {
+  question: string
+  snippet: string
+  mastery: string
+  tags: string[]
+}
+
+export interface SearchResult {
+  keyword: string
+  cards: SearchCardHit[]
+  assets: SearchAssetHit[]
+  mistakes: SearchMistakeHit[]
+  counts: { cards: number; assets: number; mistakes: number }
+}
+
+export interface TagAgg {
+  tag: string
+  count: number
+}
+
+export const searchApi = {
+  search: (keyword: string, kbId?: string, type: 'all' | 'card' | 'asset' | 'mistake' = 'all') =>
+    request.get<never, SearchResult>('/search', {
+      params: { keyword, kb_id: kbId || undefined, type },
+    }),
+  tags: () => request.get<never, { items: TagAgg[]; total: number }>('/tags'),
 }
 
 export const taskApi = {

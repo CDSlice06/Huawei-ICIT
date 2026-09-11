@@ -77,12 +77,28 @@
         show-word-limit
         placeholder="粘贴错题内容（题干、你的作答、正确答案等，AI 将解析出题目/答案/错因）"
       />
-      <p class="mw-caption">
-        图片录入需华为云 OBS 直传能力（P1-3）开通后可用，当前请使用文本描述
-      </p>
+      <div class="img-entry">
+        <el-divider><span class="mw-caption">或使用图片录入</span></el-divider>
+        <input
+          ref="mistakeImgInput"
+          type="file"
+          accept=".jpg,.jpeg,.png"
+          style="display: none"
+          @change="onMistakeImage"
+        />
+        <el-button :loading="imgUploading" @click="mistakeImgInput?.click()">
+          选择错题照片（JPG/PNG，≤10MB，自动压缩）
+        </el-button>
+        <p class="mw-caption">AI 将 OCR 识别题目并解析为结构化错题条目</p>
+      </div>
       <template #footer>
         <el-button @click="importDialog = false">取消</el-button>
-        <el-button type="primary" :disabled="!importContent.trim()" :loading="importing" @click="submitImport">
+        <el-button
+          type="primary"
+          :disabled="!importContent.trim()"
+          :loading="importing"
+          @click="submitImport"
+        >
           一键录入
         </el-button>
       </template>
@@ -152,6 +168,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { Loading } from '@element-plus/icons-vue'
 import { mistakeApi, type MistakeItem, type QuizState } from '@/api'
 import { watchTask } from '@/utils/taskWatcher'
+import { compressImage, uploadFile } from '@/utils/upload'
 
 const router = useRouter()
 
@@ -254,6 +271,39 @@ async function submitImport() {
     void load()
   } finally {
     importing.value = false
+  }
+}
+
+// ---------- 图片录入（P1-3 OBS直传/本地代存 + 压缩） ----------
+const mistakeImgInput = ref<HTMLInputElement | null>(null)
+const imgUploading = ref(false)
+
+async function onMistakeImage(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  input.value = ''
+  if (!file) return
+  if (file.size > 10 * 1024 * 1024) {
+    ElMessage.warning('图片超过10MB上限')
+    return
+  }
+  imgUploading.value = true
+  try {
+    const compressed = await compressImage(file)
+    const obsKey = await uploadFile(compressed, 'image')
+    const { task_id } = await mistakeApi.importImage(obsKey)
+    importDialog.value = false
+    ElMessage.success('已提交，AI 识别解析中')
+    watchTask(task_id, {
+      onUpdate: () => {},
+      onFinished: (status) => {
+        if (status.status !== 'done') ElMessage.error(status.error || '识别解析失败，原图已保留')
+        void load()
+      },
+    })
+    void load()
+  } finally {
+    imgUploading.value = false
   }
 }
 
