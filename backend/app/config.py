@@ -42,6 +42,14 @@ class Settings(BaseSettings):
     # 调度器
     ENABLE_SCHEDULER: bool = True
 
+    # 短信（P2-5，spec §5.1.1规则1；华为云SMS凭据见design §2.8.2资源清单）
+    ENABLE_SMS: bool = False
+    SMS_DRIVER: str = "console"  # console（演示）/ huawei（生产）
+    SMS_APP_KEY: str = ""
+    SMS_APP_SECRET: str = ""
+    SMS_SIGNATURE: str = ""
+    SMS_TEMPLATE_ID: str = ""
+
     # 异步任务
     TASK_MAX_WORKERS: int = 8
     TASK_RETRY_MAX: int = 2

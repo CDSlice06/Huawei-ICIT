@@ -6,6 +6,7 @@ from app.models.card import KnowledgeCard
 from app.models.knowledge_base import KnowledgeBase
 from app.models.mind_map import MapNode, MindMap
 from app.models.mistake import MistakeEntry, MistakeQuizRecord
+from app.models.p2 import MapPuzzleRecord, SharedKnowledgeBase
 from app.models.review_statistics import ReviewStatistics
 from app.models.review_task import ReviewTask
 from app.models.user import User
@@ -25,4 +26,6 @@ __all__ = [
     "AsyncTask",
     "MistakeEntry",
     "MistakeQuizRecord",
+    "SharedKnowledgeBase",
+    "MapPuzzleRecord",
 ]

@@ -181,6 +181,16 @@ async def refresh_statistics(db: AsyncSession, user_id: str) -> dict:
             "remember": sum(1 for rt in day_done if rt.rating == "remember"),
         })
 
+    # 连续打卡（P2-4，spec §5.6.1规则7）：从今天（或昨天）往回的连续有完成记录天数
+    done_dates = {rt.completed_at.date() for rt in done_tasks if rt.completed_at}
+    streak = 0
+    cursor = today
+    if today not in done_dates:
+        cursor = today - timedelta(days=1)  # 今天还没复习，从昨天起算不中断连续性
+    while cursor in done_dates:
+        streak += 1
+        cursor -= timedelta(days=1)
+
     result = await db.execute(select(ReviewStatistics).where(ReviewStatistics.user_id == user_id))
     stats = result.scalar_one_or_none()
     if stats is None:
@@ -190,13 +200,14 @@ async def refresh_statistics(db: AsyncSession, user_id: str) -> dict:
     stats.mastered_count = mastered
     stats.consolidating_count = consolidating
     stats.trend_data = trend
+    stats.streak_days = streak
     await db.commit()
     return {
         "total_reviews": total_reviews,
         "mastered_count": mastered,
         "consolidating_count": consolidating,
         "trend_data": trend,
-        "streak_days": stats.streak_days,
+        "streak_days": streak,
     }
 
 

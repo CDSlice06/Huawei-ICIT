@@ -10,7 +10,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_db
 from app.logging_config import log_action
-from app.schemas.auth import AuthResponse, LoginRequest, RegisterRequest, UserBrief
+from app.schemas.auth import (
+    AuthResponse,
+    LoginRequest,
+    PhoneRegisterRequest,
+    RegisterRequest,
+    SmsCodeRequest,
+    UserBrief,
+)
 from app.schemas.response import ERR_CONFLICT, ERR_UNAUTHORIZED, ERR_VALIDATION, fail, ok
 from app.services import auth_service
 
@@ -66,6 +73,43 @@ async def login(
         return fail(ERR_UNAUTHORIZED, "邮箱或密码错误", status_code=401)
     _set_session_cookie(response, token)
     log_action(logger, "login", user_id=user.id)
+    return _auth_response(user, token)
+
+
+@router.post("/sms/code", response_model=dict)
+async def send_sms_code(payload: SmsCodeRequest) -> dict:
+    """发送短信验证码（P2-5，ENABLE_SMS开关保护；console驱动仅日志输出）。"""
+    from app.infrastructure import sms as sms_infra
+
+    try:
+        await sms_infra.send_code(payload.phone)
+    except sms_infra.SmsNotConfigured as exc:
+        return fail(ERR_VALIDATION, str(exc), status_code=422)
+    except sms_infra.SmsSendError as exc:
+        return fail(ERR_VALIDATION, str(exc), status_code=503)
+    return ok(message="验证码已发送")
+
+
+@router.post("/register/phone", response_model=dict)
+async def register_by_phone(
+    payload: PhoneRegisterRequest,
+    response: Response,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """手机号+验证码注册（P2-5）。创建账号时以占位邮箱满足邮箱唯一约束。"""
+    from app.infrastructure import sms as sms_infra
+
+    if not await sms_infra.verify_code(payload.phone, payload.code):
+        return fail(ERR_VALIDATION, "验证码错误或已过期", status_code=422)
+    placeholder_email = f"{payload.phone}@phone.placeholder"
+    try:
+        user, token = await auth_service.register(db, placeholder_email, payload.password)
+    except auth_service.EmailAlreadyExists:
+        return fail(ERR_CONFLICT, "该手机号已注册，请直接登录", status_code=409)
+    user.phone = payload.phone
+    await db.commit()
+    _set_session_cookie(response, token)
+    log_action(logger, "register_phone", user_id=user.id)
     return _auth_response(user, token)
 
 

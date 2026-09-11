@@ -1,5 +1,6 @@
 """知识卡片服务（tasks.md 5.2/5.3，spec §5.3、§5.6.1规则1首排）。"""
 import json
+import logging
 from datetime import date, datetime, timedelta, timezone
 
 from sqlalchemy import select
@@ -10,6 +11,8 @@ from app.infrastructure import redis_client
 from app.infrastructure.maas_client import get_maas_client
 from app.infrastructure.prompts import STRUCTURE_SYSTEM_PROMPT, STRUCTURE_USER_TEMPLATE
 from app.models import AsyncTask, KnowledgeAsset, KnowledgeCard, ReviewTask
+
+logger = logging.getLogger(__name__)
 
 
 class StructuredSchemaError(Exception):
@@ -173,6 +176,14 @@ async def structure_task_handler(db: AsyncSession, task: AsyncTask) -> dict:
         await review_service.schedule_first_review(db, card)
     asset.parse_status = "done"
     await db.commit()
+
+    # P2-3：写入语义向量（辅助能力，失败不阻断卡片创建；无embedding的卡片不参与语义搜索）
+    try:
+        for card in cards:
+            card.embedding = await client.embed(f"{card.title}\n{card.summary}")
+        await db.commit()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("卡片语义向量生成失败（卡片已创建）: %s", exc)
 
     # 失效相关缓存
     if asset.kb_id:

@@ -72,6 +72,7 @@ async def rename_kb(
 async def delete_kb(
     kb_id: str,
     confirm: bool = False,
+    share_action: str = "keep",
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
@@ -86,9 +87,10 @@ async def delete_kb(
         return fail(40400, "知识库不存在", status_code=404)
     if not confirm:
         card_count = await kb_service.count_cards(db, kb_id)
-        return ok(data={"require_confirm": True, "card_count": card_count})
+        has_shared = await kb_service.count_active_shares(db, kb_id) > 0
+        return ok(data={"require_confirm": True, "card_count": card_count, "has_shared": has_shared})
     try:
-        deleted = await kb_service.delete_kb(db, user.id, kb_id)
+        deleted = await kb_service.delete_kb(db, user.id, kb_id, share_action=share_action)
     except kb_service.KbNotFound:
         return fail(40400, "知识库不存在", status_code=404)
     log_action(logger, "kb:delete", user_id=user.id, kb_id=kb_id, deleted_cards=deleted)

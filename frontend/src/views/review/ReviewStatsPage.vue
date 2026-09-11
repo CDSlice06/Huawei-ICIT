@@ -14,6 +14,10 @@
         <div class="stat-num consolidating">{{ stats?.consolidating_count ?? '—' }}</div>
         <div class="stat-label">待巩固卡片</div>
       </div>
+      <div class="stat-card mw-card">
+        <div class="stat-num streak">🔥 {{ stats?.streak_days ?? '—' }}</div>
+        <div class="stat-label">连续打卡（天）</div>
+      </div>
     </div>
 
     <!-- 近14天遗忘趋势（按日完成数与"记住"数） -->
@@ -76,7 +80,7 @@ onMounted(async () => {
 }
 .stat-row {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(4, 1fr);
   gap: 20px;
   margin-bottom: 24px;
 }
@@ -92,6 +96,9 @@ onMounted(async () => {
 }
 .stat-num.consolidating {
   color: var(--el-color-warning);
+}
+.stat-num.streak {
+  color: var(--el-color-danger);
 }
 .stat-label {
   margin-top: 6px;

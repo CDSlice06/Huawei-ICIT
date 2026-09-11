@@ -14,9 +14,30 @@
             <el-button @click="doSearch">搜索</el-button>
           </template>
         </el-input>
+        <el-tooltip content="基于语义向量而非字面命中（P2-3）" placement="top">
+          <el-switch v-model="semantic" active-text="语义" />
+        </el-tooltip>
       </div>
 
-      <el-empty v-if="searched && total === 0" :description="`没有找到与「${keyword}」相关的内容`" />
+      <template v-if="searched && semantic">
+        <section v-if="semanticItems.length" class="hit-group">
+          <h4 class="group-title">语义相近的卡片</h4>
+          <div
+            v-for="hit in semanticItems"
+            :key="hit.id"
+            class="hit-card mw-card"
+            @click="router.push(`/card/${hit.id}`)"
+          >
+            <div class="hit-title">
+              {{ hit.title }}
+              <el-tag size="small" type="warning">相似度 {{ (hit.similarity * 100).toFixed(1) }}%</el-tag>
+            </div>
+            <div class="hit-snippet">{{ hit.snippet }}</div>
+          </div>
+        </section>
+      </template>
+
+      <el-empty v-if="searched && total === 0 && semanticItems.length === 0" :description="`没有找到与「${keyword}」相关的内容`" />
 
       <template v-if="result">
         <!-- 卡片 -->
@@ -111,6 +132,8 @@ const mode = computed(() => (route.query.tag ? 'tag' : 'keyword'))
 const keyword = ref((route.query.keyword as string) || '')
 const tag = computed(() => (route.query.tag as string) || '')
 const result = ref<SearchResult | null>(null)
+const semantic = ref(false)
+const semanticItems = ref<{ id: string; title: string; snippet: string; similarity: number }[]>([])
 const searched = ref(false)
 const tagCards = ref<CardItem[]>([])
 const assetDialog = ref(false)
@@ -124,6 +147,13 @@ async function doSearch() {
   const kw = keyword.value.trim()
   if (!kw) return
   result.value = await searchApi.search(kw)
+  semanticItems.value = []
+  if (semantic.value) {
+    semanticItems.value = await searchApi
+      .semantic(kw)
+      .then((r) => r.items)
+      .catch(() => [])
+  }
   searched.value = true
 }
 

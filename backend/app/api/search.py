@@ -46,3 +46,25 @@ async def list_tags(
     """用户卡片标签聚合（按使用次数排序）。"""
     tags = await search_service.aggregate_tags(db, user.id)
     return ok(data={"items": tags, "total": len(tags)})
+
+
+@router.get("/search/semantic", response_model=dict)
+async def search_semantic(
+    keyword: str = Query(description="自然语言查询"),
+    limit: int = Query(default=10, ge=1, le=30),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """语义搜索（P2-3，spec §5.4.1规则5）：MaaS embedding + 内存余弦比对。
+
+    依赖 MaaS 配置与卡片向量（结构化生成时写入）；未配置/无向量时返回明确提示。
+    """
+    from app.services import search_service
+
+    try:
+        data = await search_service.semantic_search(db, user.id, keyword, limit)
+    except search_service.SearchValidationError as exc:
+        return fail(ERR_VALIDATION, str(exc), status_code=422)
+    log_action(logger, "search_semantic", user_id=user.id, keyword=keyword[:50],
+               hits=len(data.get("items", [])))
+    return ok(data=data)

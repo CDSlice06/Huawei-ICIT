@@ -73,8 +73,10 @@ from app.api import (  # noqa: E402
     cards,
     knowledge_bases,
     mind_maps,
+    forum,
     mistakes,
     obs,
+    puzzles,
     reviews,
     search,
     tasks,
@@ -88,6 +90,8 @@ app.include_router(knowledge_bases.router, prefix="/api")
 app.include_router(mind_maps.router, prefix="/api")
 app.include_router(reviews.router, prefix="/api")
 app.include_router(mistakes.router, prefix="/api")
+app.include_router(forum.router, prefix="/api")
+app.include_router(puzzles.router, prefix="/api")
 app.include_router(search.router, prefix="/api")
 app.include_router(tasks.router, prefix="/api")
 app.include_router(admin.router, prefix="/api")

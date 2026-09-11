@@ -234,3 +234,70 @@ async def aggregate_tags(db: AsyncSession, user_id: str, limit: int = 50) -> lis
             counts[tag] = counts.get(tag, 0) + 1
     ordered = sorted(counts.items(), key=lambda x: (-x[1], x[0]))[:limit]
     return [{"tag": t, "count": c} for t, c in ordered]
+
+
+# ---------------- 语义搜索（P2-3，spec §5.4.1规则5） ----------------
+
+
+def _cosine(a: list[float], b: list[float]) -> float:
+    """余弦相似度（内存比对，单用户万级以内可接受）。"""
+    import math
+
+    if not a or not b or len(a) != len(b):
+        return 0.0
+    dot = sum(x * y for x, y in zip(a, b))
+    na = math.sqrt(sum(x * x for x in a))
+    nb = math.sqrt(sum(y * y for y in b))
+    if na == 0 or nb == 0:
+        return 0.0
+    return dot / (na * nb)
+
+
+async def semantic_search(db: AsyncSession, user_id: str, keyword: str, limit: int = 10) -> dict:
+    """语义搜索：查询文本向量化后与卡片向量内存余弦比对，返回最相近卡片。"""
+    from app.infrastructure.maas_client import MaasError, get_maas_client
+    from app.models import KnowledgeCard
+
+    kw = (keyword or "").strip()
+    if not kw:
+        raise SearchValidationError("搜索关键词不能为空")
+    if len(kw) > KEYWORD_MAX_CHARS:
+        raise SearchValidationError(f"关键词超过{KEYWORD_MAX_CHARS}字符")
+
+    try:
+        client = get_maas_client()
+        query_vec = await client.embed(kw)
+    except MaasError as exc:
+        raise SearchValidationError(f"语义搜索需要MaaS embedding支持：{exc}") from exc
+
+    rows = (
+        await db.execute(
+            sa_text(
+                "SELECT id, kb_id, title, summary, tags, embedding FROM t_knowledge_card "
+                "WHERE user_id = :uid AND embedding IS NOT NULL"
+            ),
+            {"uid": user_id},
+        )
+    ).all()
+
+    scored = []
+    for r in rows:
+        vec = _parse_tags(r.embedding)  # JSON数组同样以字符串形式返回
+        if not vec:
+            continue
+        scored.append((float(_cosine(query_vec, vec)), r))
+    scored.sort(key=lambda x: -x[0])
+
+    items = [
+        {
+            "id": str(r.id),
+            "kb_id": str(r.kb_id) if r.kb_id else None,
+            "title": r.title,
+            "snippet": _snippet(r.summary, kw) if kw.lower() in (r.summary or "").lower() else r.summary,
+            "tags": _parse_tags(r.tags),
+            "similarity": round(score, 4),
+        }
+        for score, r in scored[:limit]
+        if score > 0.0
+    ]
+    return {"keyword": kw, "items": items, "total": len(items), "vectorized_cards": len(scored)}

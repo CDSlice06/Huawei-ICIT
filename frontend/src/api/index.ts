@@ -235,6 +235,88 @@ export const searchApi = {
       params: { keyword, kb_id: kbId || undefined, type },
     }),
   tags: () => request.get<never, { items: TagAgg[]; total: number }>('/tags'),
+  /** 语义搜索（P2-3）：MaaS embedding + 余弦比对 */
+  semantic: (keyword: string, limit = 10) =>
+    request.get<never, { keyword: string; items: { id: string; kb_id: string | null; title: string; snippet: string; tags: string[]; similarity: number }[]; total: number; vectorized_cards: number }>(
+      '/search/semantic',
+      { params: { keyword, limit } },
+    ),
+}
+
+// ---------- 论坛分享（P2-1，spec §5.7） ----------
+
+export interface ShareListItem {
+  id: string
+  title: string
+  sharer_email?: string
+  source_kb_id?: string
+  status?: 'shared' | 'cancelled'
+  card_count: number
+  shared_at: string
+  updated_at: string
+}
+
+export interface SnapshotCard {
+  id: string
+  title: string
+  summary: string
+  key_points: string[]
+  qa: { question: string; answer: string }[]
+  tags: string[]
+}
+
+export interface SnapshotNode {
+  id: string
+  title: string
+  parent_id: string | null
+  card_id: string | null
+  x: number | null
+  y: number | null
+}
+
+export interface ShareDetail {
+  id: string
+  title: string
+  sharer_email: string | null
+  kb_name: string | null
+  cards: SnapshotCard[]
+  mind_maps: { id: string; version_source: string; nodes: SnapshotNode[] }[]
+  shared_at: string
+  updated_at: string
+}
+
+export const forumApi = {
+  share: (kbId: string, title?: string) =>
+    request.post<never, { id: string; title: string }>('/forum/shares', { kb_id: kbId, title }),
+  list: () => request.get<never, { items: ShareListItem[]; total: number }>('/forum/shares'),
+  mine: () => request.get<never, { items: ShareListItem[]; total: number }>('/forum/shares?mine=true'),
+  detail: (id: string) => request.get<never, ShareDetail>(`/forum/shares/${id}`),
+  update: (id: string) => request.put<never, unknown>(`/forum/shares/${id}`),
+  cancel: (id: string) => request.delete(`/forum/shares/${id}`),
+}
+
+// ---------- 导图拼图自测（P2-2，spec §6.11） ----------
+
+export interface PuzzleView {
+  puzzle_id: string
+  kb_id?: string
+  progress: 'in_progress' | 'done'
+  total: number
+  nodes: { id: string; title: string }[]
+  started_at: string
+  result: { correct: number; total: number; details: Record<string, boolean> } | null
+  completed_at: string | null
+}
+
+export const puzzleApi = {
+  create: (kbId: string) =>
+    request.post<never, PuzzleView>('/map-puzzles', { kb_id: kbId }),
+  get: (id: string) => request.get<never, PuzzleView>(`/map-puzzles/${id}`),
+  submit: (id: string, assignments: Record<string, string | null>) =>
+    request.post<never, { puzzle_id: string; correct: number; total: number; details: Record<string, boolean>; completed_at: string }>(
+      `/map-puzzles/${id}/submit`,
+      { assignments },
+    ),
 }
 
 export const taskApi = {

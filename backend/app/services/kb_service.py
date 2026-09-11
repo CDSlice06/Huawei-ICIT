@@ -105,10 +105,33 @@ async def count_cards(db: AsyncSession, kb_id: str) -> int:
     return int(result.scalar_one() or 0)
 
 
-async def delete_kb(db: AsyncSession, user_id: str, kb_id: str) -> int:
-    """删除知识库：级联删除卡片+导图+节点+复习任务（spec §5.4.1规则3）。返回级联删除的卡片数。"""
+async def count_active_shares(db: AsyncSession, kb_id: str) -> int:
+    """统计该库生效中的论坛分享数（spec §5.7.3异常2 删除确认明示用）。"""
+    from sqlalchemy import func
+
+    from app.models import SharedKnowledgeBase
+
+    result = await db.execute(
+        select(func.count()).select_from(SharedKnowledgeBase).where(
+            SharedKnowledgeBase.source_kb_id == kb_id, SharedKnowledgeBase.status == "shared"
+        )
+    )
+    return int(result.scalar_one() or 0)
+
+
+async def delete_kb(
+    db: AsyncSession, user_id: str, kb_id: str, share_action: str = "keep"
+) -> int:
+    """删除知识库：级联删除卡片+导图+节点+复习任务（spec §5.4.1规则3）。返回级联删除的卡片数。
+
+    share_action（spec §5.7.3异常2/§6.6规则5）：keep=保留论坛快照继续展示；remove=同时移除分享。
+    """
+    from app.services import forum_service
+
     kb = await get_owned_kb(db, user_id, kb_id)
     card_count = await count_cards(db, kb_id)
+    if share_action == "remove":
+        await forum_service.cancel_shares_of_kb(db, kb_id)
 
     # 级联：复习任务（经由卡片）
     cards_result = await db.execute(select(KnowledgeCard).where(KnowledgeCard.kb_id == kb_id))

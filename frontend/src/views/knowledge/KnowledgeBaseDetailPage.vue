@@ -12,6 +12,7 @@
           <el-radio-button value="map">思维导图</el-radio-button>
         </el-radio-group>
         <el-button size="small" :loading="genLoading" @click="generateMap">生成导图</el-button>
+        <el-button size="small" @click="shareToForum">分享到论坛</el-button>
       </div>
     </div>
 
@@ -109,9 +110,9 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { ArrowLeft } from '@element-plus/icons-vue'
-import { cardApi, kbApi, mapApi, type CardItem } from '@/api'
+import { cardApi, forumApi, kbApi, mapApi, type CardItem } from '@/api'
 import { watchTask } from '@/utils/taskWatcher'
 import MindMapCanvas from '@/components/mindmap/MindMapCanvas.vue'
 
@@ -175,6 +176,16 @@ async function generateMap() {
     })
   } finally {
     genLoading.value = false
+  }
+}
+
+async function shareToForum() {
+  await ElMessageBox.confirm('将生成当前内容的只读快照分享至论坛，后续编辑不会自动同步', '分享到论坛', { type: 'info' })
+  try {
+    await forumApi.share(kbId.value)
+    ElMessage.success('分享成功，论坛可见')
+  } catch {
+    /* 重复分享/空库等错误由拦截器提示 */
   }
 }
 

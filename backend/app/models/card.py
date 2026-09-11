@@ -46,4 +46,5 @@ class KnowledgeCard(UuidPkMixin, Base):
     )
     review_interval_days: Mapped[int] = mapped_column(INT, nullable=False, default=1, comment="当前复习间隔(天)")
     review_count: Mapped[int] = mapped_column(INT, nullable=False, default=0, comment="累计复习次数")
+    embedding: Mapped[list | None] = mapped_column(JSON, nullable=True, comment="语义向量(P2-3,MaaS embedding)")
     created_at: Mapped[datetime] = mapped_column(DATETIME, nullable=False, comment="创建时间")
