@@ -15,3 +15,6 @@ __pycache__/
 node_modules/
 dist/
 *.tsbuildinfo
+
+# 本地演示模式(无OBS)的后端代存目录
+backend/uploads/
