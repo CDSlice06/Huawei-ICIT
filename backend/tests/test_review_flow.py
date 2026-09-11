@@ -1,10 +1,17 @@
 # -*- coding: utf-8 -*-
 """复习流程测试（tasks.md 8.2/8.3/14.1）：结构化首排、今日清单、三档自评重算、重复提交409。"""
 import uuid
+from datetime import date, datetime, timedelta, timezone
 
 from sqlalchemy import select
 
 from app.models import AsyncTask, KnowledgeCard, ReviewTask
+
+
+def UTC_TODAY():
+    """与服务层一致的UTC日期（date.today()为本地时区，跨午夜会产生时区偏差）。"""
+    return datetime.now(timezone.utc).date()
+
 from app.services import card_service
 
 
@@ -51,7 +58,7 @@ async def _setup_card_with_content(client, session_factory, monkeypatch) -> dict
 
 async def test_structure_schedules_first_review(client, session_factory, monkeypatch):
     """结构化成功后出现次日 pending 首排任务（spec §5.6.1规则1）。"""
-    from datetime import date, timedelta
+    from datetime import date, datetime, timedelta, timezone
 
     ctx = await _setup_card_with_content(client, session_factory, monkeypatch)
     async with session_factory() as db:
@@ -63,7 +70,7 @@ async def test_structure_schedules_first_review(client, session_factory, monkeyp
             )
         ).scalars().all()
         assert len(tasks) == 1
-        assert tasks[0].planned_date == date.today() + timedelta(days=1)
+        assert tasks[0].planned_date == UTC_TODAY() + timedelta(days=1)
 
 
 async def test_today_list_empty_before_due(client, session_factory, monkeypatch):
@@ -76,7 +83,7 @@ async def test_today_list_empty_before_due(client, session_factory, monkeypatch)
 
 async def test_today_list_and_submit_rating(client, session_factory, monkeypatch):
     """到期任务出现在今日清单；提交"记住"后间隔升档、次日任务生成。"""
-    from datetime import date, timedelta
+    from datetime import date, datetime, timedelta, timezone
 
     ctx = await _setup_card_with_content(client, session_factory, monkeypatch)
     headers = {"Authorization": f"Bearer {ctx['token']}"}
@@ -87,7 +94,7 @@ async def test_today_list_and_submit_rating(client, session_factory, monkeypatch
             ReviewTask(
                 card_id=ctx["card_id"],
                 user_id=await _user_id(client, headers),
-                planned_date=date.today(),
+                planned_date=UTC_TODAY(),
                 status="pending",
             )
         )
@@ -105,7 +112,7 @@ async def test_today_list_and_submit_rating(client, session_factory, monkeypatch
     assert submit.status_code == 200
     result = submit.json()["data"]
     assert result["next_interval_days"] == 2  # 首排1天 + 记住 → 升到2天档
-    assert result["next_review_date"] == (date.today() + timedelta(days=2)).isoformat()
+    assert result["next_review_date"] == (UTC_TODAY() + timedelta(days=2)).isoformat()
 
     # 今日清单清空（今日任务done、下次任务在明天）
     today2 = await client.get("/api/reviews/today", headers=headers)
@@ -114,7 +121,7 @@ async def test_today_list_and_submit_rating(client, session_factory, monkeypatch
 
 async def test_rating_forget_resets_interval(client, session_factory, monkeypatch):
     """自评"忘记"→ 间隔重置1天、次日重回列表。"""
-    from datetime import date, timedelta
+    from datetime import date, datetime, timedelta, timezone
 
     ctx = await _setup_card_with_content(client, session_factory, monkeypatch)
     headers = {"Authorization": f"Bearer {ctx['token']}"}
@@ -124,7 +131,7 @@ async def test_rating_forget_resets_interval(client, session_factory, monkeypatc
             ReviewTask(
                 card_id=ctx["card_id"],
                 user_id=await _user_id(client, headers),
-                planned_date=date.today(),
+                planned_date=UTC_TODAY(),
                 status="pending",
             )
         )
@@ -136,7 +143,7 @@ async def test_rating_forget_resets_interval(client, session_factory, monkeypatc
     )
     assert submit.status_code == 200
     assert submit.json()["data"]["next_interval_days"] == 1
-    assert submit.json()["data"]["next_review_date"] == (date.today() + timedelta(days=1)).isoformat()
+    assert submit.json()["data"]["next_review_date"] == (UTC_TODAY() + timedelta(days=1)).isoformat()
 
 
 async def test_invalid_rating_422_and_repeated_submit_409(client, session_factory, monkeypatch):
@@ -150,7 +157,7 @@ async def test_invalid_rating_422_and_repeated_submit_409(client, session_factor
             ReviewTask(
                 card_id=ctx["card_id"],
                 user_id=await _user_id(client, headers),
-                planned_date=date.today(),
+                planned_date=UTC_TODAY(),
                 status="pending",
             )
         )

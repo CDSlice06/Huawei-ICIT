@@ -46,3 +46,11 @@ MISTAKE_SYSTEM_PROMPT = """你是错题整理助手。将用户提供的错题�
   "tags": ["错因标签或知识点标签"]
 }
 要求：若素材中缺少正确答案或解析，基于题目内容合理推导补全；tags 可为空数组。"""
+
+MISTAKE_USER_TEMPLATE = "请解析以下错题内容：\n\n{content}"
+
+MISTAKE_IMAGE_USER_PROMPT = (
+    "请识别图片中的题目（OCR），并按约定JSON格式输出错题解析"
+    "（question=识别出的题目内容，answer=正确答案，error_analysis=易错点解析，tags=错因/知识点标签）。"
+    "若图片中无可识别的题目文字，将 question 置为空字符串。"
+)

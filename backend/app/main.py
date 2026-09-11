@@ -26,11 +26,12 @@ async def lifespan(app: FastAPI):
     import asyncio
 
     from app.infrastructure import scheduler, task_runner
-    from app.services import card_service, map_service
+    from app.services import card_service, map_service, mistake_service
 
-    # 注册任务处理器（handler注册表机制，tasks.md 4.2/5.2/7.1）
+    # 注册任务处理器（handler注册表机制，tasks.md 4.2/5.2/7.1/P1-1）
     task_runner.register_handler("structure", card_service.structure_task_handler)
     task_runner.register_handler("map_gen", map_service.map_gen_task_handler)
+    task_runner.register_handler("mistake_parse", mistake_service.mistake_parse_task_handler)
 
     loop = asyncio.get_running_loop()
     task_runner.init_runner(loop)
@@ -65,7 +66,17 @@ async def internal_error_handler(request: Request, exc: Exception):
 
 
 # 挂载业务路由
-from app.api import admin, assets, auth, cards, knowledge_bases, mind_maps, reviews, tasks  # noqa: E402
+from app.api import (  # noqa: E402
+    admin,
+    assets,
+    auth,
+    cards,
+    knowledge_bases,
+    mind_maps,
+    mistakes,
+    reviews,
+    tasks,
+)
 
 app.include_router(auth.router, prefix="/api")
 app.include_router(assets.router, prefix="/api")
@@ -73,6 +84,7 @@ app.include_router(cards.router, prefix="/api")
 app.include_router(knowledge_bases.router, prefix="/api")
 app.include_router(mind_maps.router, prefix="/api")
 app.include_router(reviews.router, prefix="/api")
+app.include_router(mistakes.router, prefix="/api")
 app.include_router(tasks.router, prefix="/api")
 app.include_router(admin.router, prefix="/api")
 

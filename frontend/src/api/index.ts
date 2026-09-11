@@ -140,3 +140,84 @@ export interface TaskStatus {
 export const taskApi = {
   get: (taskId: string) => request.get<never, TaskStatus>(`/tasks/${taskId}`),
 }
+
+// ---------- 错题本（P1-1，spec §5.8、design §2.2.2.8） ----------
+
+export interface MistakeItem {
+  id: string
+  question: string
+  answer: string
+  error_analysis: string
+  tags: string[]
+  source_type: 'image' | 'text'
+  obs_key: string | null
+  kb_id: string | null
+  card_id: string | null
+  mastery: 'unmastered' | 'mastered'
+  parse_status: 'parsing' | 'done' | 'failed'
+  created_at: string
+}
+
+export interface QuizItemView {
+  entry_id: string
+  question: string
+  tags: string[]
+  source_type: 'image' | 'text'
+  obs_key: string | null
+}
+
+export type QuizMark = 'mastered' | 'still_not'
+
+export interface QuizStartResult {
+  quiz_id: string
+  strategy: 'sequential' | 'random'
+  scope: { scope: string; count: number }
+  total: number
+  items: QuizItemView[]
+}
+
+export interface QuizState {
+  quiz_id: string
+  strategy: 'sequential' | 'random'
+  scope: { scope: string; count: number }
+  progress: 'in_progress' | 'done' | 'abandoned'
+  total: number
+  marks: { entry_id: string; mark: QuizMark }[]
+  pending: QuizItemView[]
+  started_at: string
+  ended_at: string | null
+}
+
+export const mistakeApi = {
+  importText: (content: string) =>
+    request.post<never, { task_id: string; mistake_id: string }>('/mistakes/text', { content }),
+  /** 图片录入依赖 OBS 直传（P1-3）落地后开放 */
+  importImage: (obsKey: string) =>
+    request.post<never, { task_id: string; mistake_id: string }>('/mistakes/image', { obs_key: obsKey }),
+  list: (params: {
+    mastery?: 'unmastered' | 'mastered' | 'all'
+    parse_status?: 'parsing' | 'done' | 'failed'
+    page?: number
+    size?: number
+  }) => request.get<never, { items: MistakeItem[]; total: number; page: number; size: number }>('/mistakes', { params }),
+  get: (id: string) => request.get<never, MistakeItem>(`/mistakes/${id}`),
+  update: (
+    id: string,
+    payload: Partial<Pick<MistakeItem, 'question' | 'answer' | 'error_analysis' | 'tags' | 'kb_id' | 'card_id'>>,
+  ) => request.put<never, MistakeItem>(`/mistakes/${id}`, payload),
+  remove: (id: string) => request.delete(`/mistakes/${id}`),
+  setMastery: (id: string, mastery: 'mastered' | 'unmastered') =>
+    request.patch<never, MistakeItem>(`/mistakes/${id}/mastery`, { mastery }),
+  reparse: (id: string) =>
+    request.post<never, { task_id: string; mistake_id: string }>(`/mistakes/${id}/reparse`),
+  startQuiz: (payload: { strategy: 'sequential' | 'random'; count: number; scope: 'unmastered' | 'all' }) =>
+    request.post<never, QuizStartResult>('/mistakes/quiz', payload),
+  quizState: (quizId: string) => request.get<never, QuizState>(`/mistakes/quiz/${quizId}`),
+  quizAnswer: (quizId: string, entryId: string, mark: QuizMark) =>
+    request.post<never, { marked: number; total: number; finished: boolean; entry_mastery: string }>(
+      `/mistakes/quiz/${quizId}/answer`,
+      { entry_id: entryId, mark },
+    ),
+  quizAbandon: (quizId: string) =>
+    request.patch<never, unknown>(`/mistakes/quiz/${quizId}/status`, { status: 'abandoned' }),
+}

@@ -151,3 +151,10 @@ async def no_submit(monkeypatch):
     submitted: list[str] = []
     monkeypatch.setattr(task_runner, "submit_task", lambda task_id: submitted.append(task_id))
     return submitted
+
+
+@pytest_asyncio.fixture
+async def kb_with_user(client, auth_headers):
+    """已注册用户上下文（user_id 与 auth_headers 指向同一账号，供直接构造业务数据）。"""
+    me = await client.get("/api/auth/me", headers=auth_headers)
+    return {"user_id": me.json()["data"]["id"], "headers": auth_headers}
