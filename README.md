@@ -146,4 +146,3 @@ curl -X POST http://<服务器IP>/api/admin/demo/reset \
 
 ---
 
-*第十一届华为ICT大赛创新赛参赛项目 · 2026*
